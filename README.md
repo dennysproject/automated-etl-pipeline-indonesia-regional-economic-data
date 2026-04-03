@@ -44,3 +44,25 @@ def clean_bps_metadata(df, prov_map):
     df = df[df['region_id'] != '9999'] # Exclude National Total
     df['provinsi'] = df['provinsi'].str.title() # For UI/UX consistency
     return df
+```
+
+---
+
+## 📊 Sample Output (PostgreSQL Table)
+The final transformed data is stored in a long-format structure, optimized for BI "Slicing and Dicing."
+
+| year | prov_id | province_name | pdrb_value (Billion IDR) | yoy_growth |
+| :--- | :--- | :--- | :--- | :--- |
+| 2023 | 3100 | Dki Jakarta | 2,100,540.20 | 4.95% |
+| 2023 | 3200 | Jawa Barat | 1,850,210.15 | 5.02% |
+| 2023 | 7300 | Sulawesi Selatan | 450,120.44 | 5.10% |
+
+---
+
+## 🚀 How to Run
+Follow these steps to replicate the ETL pipeline on your local machine:
+
+1. **Clone the Repository:**
+   ```bash
+   git clone [https://github.com/yourusername/bps-pdrb-etl.git](https://github.com/dennysproject/automated-etl-pipeline-indonesia-regional-economic-data.git)
+   cd bps-pdrb-etl
