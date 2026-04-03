@@ -66,3 +66,21 @@ Follow these steps to replicate the ETL pipeline on your local machine:
    ```bash
    git clone [https://github.com/yourusername/bps-pdrb-etl.git](https://github.com/dennysproject/automated-etl-pipeline-indonesia-regional-economic-data.git)
    cd bps-pdrb-etl
+   ```
+2. **Install Dependencies:**
+   Ensure you have Python 3.9+ installed, then run:
+   ```bash
+   pip install -r requirements.txt
+   ```
+3. **Database Setup**
+   * Create a PostgreSQL database named `bps_economics`.
+   * Run the SQL script located in `/sql/create_table.sql` to initialize the schema.
+5. **Configuration**
+   * Open the notebook or script and update the `connection_string` with your local PostgreSQL credentials (Host, User, Password).
+6. **Execute**
+   * Run the Jupyter Notebook `etl_pdrb_total.ipynb` or the main script.
+
+---
+**Author**: Denny Ruchiat
+
+**LinkedIn**: https://www.linkedin.com/in/dennyruchiatatwork/
