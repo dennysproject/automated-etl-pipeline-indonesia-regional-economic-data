@@ -1,86 +1,133 @@
 # 🚀 Automated ETL Pipeline: Indonesia Regional Economic Data (BPS)
 
 ## 📌 Project Overview
-Manual collection of regional economic data (PDRB) from the Central Bureau of Statistics (BPS) is often hindered by fragmented APIs and inconsistent regional identifiers. This project automates the **Extraction, Transformation, and Loading (ETL)** of PDRB data across **38 provinces** from 2010 to 2025.
 
-* **Data Source:** BPS (Badan Pusat Statistik) Indonesia Web API.
-* **Target:** PostgreSQL Relational Database.
-* **Tech Stack:** Python (Pandas, Requests, SQLAlchemy), PostgreSQL, JSON Processing.
+The BPS (Badan Pusat Statistik) Web API returns regional economic data as nested JSON keyed by composite IDs, which makes it hard to use directly for analysis. This project extracts regional PDRB (Gross Regional Domestic Product) data for 2010 to 2025, transforms it into a clean long-format table, and loads it into PostgreSQL for BI analysis.
+
+- **Data Source:** BPS (Badan Pusat Statistik) Indonesia Web API
+- **Coverage:** Regency and city level data, grouped under up to 38 provinces, 2010 to 2025
+- **Target:** PostgreSQL relational database
+- **Tech Stack:** Python (Pandas, Requests, SQLAlchemy), PostgreSQL, JSON processing
 
 ---
 
-## 🏗️ Architecture & Pipeline
-The pipeline follows a modular architecture to ensure data integrity from the BPS server to the final analytics layer.
+## 🏗️ Pipeline
 
+```
+BPS Web API (JSON)  ->  Python (requests, pandas)  ->  PostgreSQL  ->  BI tools
+```
 
-
-1.  **Extraction:** Programmatically fetching nested JSON data from the BPS dynamic API using the `requests` library.
-2.  **Transformation:** * Slicing 16-digit composite strings to extract meaningful Year and Value codes.
-    * Mapping BPS internal `prov_map` codes (e.g., `9400`) to standardized provincial names.
-    * Handling the "Papua Expansion" logic (splitting Papua into New Autonomous Regions/DOB).
-3.  **Loading:** Upserting cleaned, long-format data into a **PostgreSQL** schema for downstream BI analysis.
+1. **Extraction:** Request the BPS API once per year (year IDs 110 to 125, which map to 2010 to 2025) using `requests`, with a 1 second pause between calls to avoid rate limits.
+2. **Transformation:**
+   - Match each value in the JSON `datacontent` to its region and year by rebuilding its composite ID (region + variable + turvar + year + turtahun).
+   - Derive the province from the first 2 digits of each region ID and map it to a province name, including the newer Papua provinces.
+   - Convert values to numbers and remove rows with missing values or unmapped provinces.
+3. **Loading:** Write the cleaned long-format table to PostgreSQL with pandas `to_sql` (full refresh on every run).
 
 ---
 
 ## 🔍 Engineering Highlights
 
-### 1. Handling Nested JSON & Metadata
-The BPS API returns data in a "Cell" format that isn't immediately tabular. I developed a recursive parser to flatten this structure, ensuring that `region_id` and `pdrb_value` are correctly aligned across 15+ years of historical data.
+### 1. Handling Nested JSON
 
-### 2. Standardizing Regional Identifiers
-**Challenge:** BPS metadata uses 4-digit codes (e.g., `1100`) while older maps use 2-digit codes (`11`).
-**Solution:** Implemented a string-cleaning layer that standardizes all regional IDs to a 4-digit format, preventing "null joins" during geospatial visualization.
+The API response contains three parts: `vervar` (regions), `tahun` (years) and `datacontent` (values keyed by one long composite ID). I rebuilt the expected ID for every region and year combination and used it to attach the right value to the right region and year across 16 years of data.
 
-### 3. Case Sensitivity & UI/UX Consistency
-To ensure the data is "Dashboard Ready," the pipeline automatically converts ALL CAPS province names to **Title Case** and removes the "National Total" (ID 9999) to prevent double-counting in aggregations.
+### 2. Regional Codes and the Papua Expansion
+
+Province names are derived from the first 2 digits of each region ID using a `prov_map` dictionary. The map includes the newer provinces created from Papua (Papua Selatan, Papua Tengah, Papua Pegunungan and Papua Barat Daya), so recent years are labeled correctly.
+
+### 3. Data Cleaning
+
+Values are converted to numbers, and rows with missing values or unmapped province codes (labeled `Unknown (xx)`) are removed before loading.
+
+### 4. Credentials Kept Out of the Code
+
+The API key and database credentials are read from a local `.env` file, which is excluded from Git. A `.env.example` file shows the required variables.
 
 ---
 
-## 🛠️ Code Snippet: Transformation Layer
+## ⚠️ Known Limitations and Next Steps
+
+- **Full refresh:** each run replaces the whole table (`if_exists='replace'`). An incremental load with upserts would be more efficient.
+- **ID matching is simple but slow:** for every value, the code checks every region and year combination. Parsing the composite ID directly would be faster.
+- **Basic error handling:** failed requests are printed and skipped, with no retry logic.
+
+---
+
+## 🛠️ Code Snippets
+
+**Province mapping and cleaning**
+
 ```python
-# Mapping ID to Name and Standardizing Case
-def clean_bps_metadata(df, prov_map):
-    df['provinsi'] = df['vervar'].map(prov_map)
-    df = df[df['region_id'] != '9999'] # Exclude National Total
-    df['provinsi'] = df['provinsi'].str.title() # For UI/UX consistency
-    return df
+def get_prov_from_id(kab_id):
+    kode_prov = str(kab_id)[:2]
+    return prov_map.get(kode_prov, f"Unknown ({kode_prov})")
+
+df_final_clean = df_final[
+    ~df_final['Provinsi'].str.startswith("Unknown") &
+    df_final['PDRB'].notnull()
+].copy()
+```
+
+**Matching values by composite ID**
+
+```python
+expected_id = f"{k_id}21941550{t_id}0"
+if full_id == expected_id:
+    all_data.append({...})
 ```
 
 ---
 
-## 📊 Sample Output (PostgreSQL Table)
-The final transformed data is stored in a long-format structure, optimized for BI "Slicing and Dicing."
+## 📊 Sample Output (PostgreSQL table `pdrb_regional_2010_2025`)
 
-| year | prov_id | province_name | pdrb_value (Billion IDR) | yoy_growth |
-| :--- | :--- | :--- | :--- | :--- |
-| 2023 | 3100 | Dki Jakarta | 2,100,540.20 | 4.95% |
-| 2023 | 3200 | Jawa Barat | 1,850,210.15 | 5.02% |
-| 2023 | 7300 | Sulawesi Selatan | 450,120.44 | 5.10% |
+The data is stored in long format, with one row per region and year.
+
+| Provinsi | Kabupaten         | Tahun |     PDRB |
+| :------- | :---------------- | :---- | -------: |
+| Aceh     | Bireuen           | 2025  | 12191.19 |
+| Aceh     | Aceh Barat Daya   | 2025  |  3596.03 |
+| Aceh     | Aceh Barat        | 2025  |  9068.13 |
+| Aceh     | Gayo Lues         | 2025  |  2248.44 |
+| Aceh     | Kota Subulussalam | 2025  |  1685.68 |
+
+Quick check in SQL (column names have capital letters, so they need double quotes):
+
+```sql
+SELECT "Tahun", COUNT(DISTINCT "Provinsi") AS provinces, COUNT(*) AS rows
+FROM pdrb_regional_2010_2025
+GROUP BY "Tahun"
+ORDER BY "Tahun";
+```
 
 ---
 
 ## 🚀 How to Run
-Follow these steps to replicate the ETL pipeline on your local machine:
 
-1. **Clone the Repository:**
-   ```bash
-   git clone [https://github.com/yourusername/bps-pdrb-etl.git](https://github.com/dennysproject/automated-etl-pipeline-indonesia-regional-economic-data.git)
-   cd bps-pdrb-etl
-   ```
-2. **Install Dependencies:**
-   Ensure you have Python 3.9+ installed, then run:
-   ```bash
+1. **Clone the repository**
+
+```bash
+   git clone https://github.com/dennysproject/automated-etl-pipeline-indonesia-regional-economic-data.git
+   cd automated-etl-pipeline-indonesia-regional-economic-data
+```
+
+2. **Install dependencies** (Python 3.9+)
+
+```bash
    pip install -r requirements.txt
-   ```
-3. **Database Setup**
-   * Create a PostgreSQL database named `bps_economics`.
-   * Run the SQL script located in `/sql/create_table.sql` to initialize the schema.
-5. **Configuration**
-   * Open the notebook or script and update the `connection_string` with your local PostgreSQL credentials (Host, User, Password).
-6. **Execute**
-   * Run the Jupyter Notebook `etl_pdrb_total.ipynb` or the main script.
+   pip install jupyter
+```
+
+3. **Create the database**
+   - Create a PostgreSQL database named `bps_analysis`. The notebook creates the table automatically.
+4. **Configure credentials**
+   - Get an API key from the BPS WebAPI site (webapi.bps.go.id).
+   - Copy `.env.example` to `.env` and fill in your API key and database credentials.
+5. **Run**
+   - Open `etl-pdrb-total.ipynb` and run all cells.
 
 ---
+
 **Author**: Denny Ruchiat
 
 **LinkedIn**: https://www.linkedin.com/in/dennyruchiatatwork/
